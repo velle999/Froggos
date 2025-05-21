@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Frog Vaudeville: Chiptune Edition</title>
+  <style>
+    html, body { margin: 0; background: #1b1c25; height: 100%; }
+    body { width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    canvas { background: #232e3a; border-radius: 32px; box-shadow: 0 0 60px #4df66e77; }
+    #musicBtn {
+      position: absolute; top: 16px; left: 16px;
+      background: #161d2e; color: #fff; border: none;
+      border-radius: 10px; font-size: 1.2em; padding: 12px 26px;
+      box-shadow: 0 4px 18px #2228; cursor: pointer;
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+<canvas id="frog" width="900" height="460"></canvas>
+<button id="musicBtn">🎵 Start Music & Sound</button>
+<script>
+// ======== SETTINGS ========
+const FROG_COUNT = 5;
+const SCALE = 4;
+const FROG_SPACE = 138;
+const FROG_MARGIN = 64;
+const CROWD_ROWS = 2, CROWD_COLS = 8;
+const LYRICS = [
+  { text: "🎩 It's not easy, being green,", beats: 40 },
+  { text: "But it's easier with a cane!", beats: 40 },
+  { text: "Do the kick, the hop, the tip o' the hat—", beats: 50 },
+  { text: "Sing along, don't refrain!", beats: 38 },
+  { text: "F-R-O-G!", beats: 24 }
+];
+const LYRICS_BEAT = 15;
+
+// ======== SOUND SETUP ========
+// Chiptune version of "The Entertainer"
+const RAGTIME_MUSIC = "https://ia601300.us.archive.org/10/items/RagtimePianoSCOTTJOPLIN.TheEntertainer1902/Ragtime%20Piano%20_%20SCOTT%20JOPLIN%20.%20%20The%20Entertainer%20%20%281902%29.ogg";
+const APPLAUSE_URL = "https://pixabay.com/sound-effects/applause-01-253125/";
+let music = new Audio(RAGTIME_MUSIC);
+music.loop = true;
+let applause = new Audio(APPLAUSE_URL);
+applause.volume = 0.32;
+let audioCtx;
+function playCaneTwirl() {
+  if (!audioCtx) return;
+  // Oscillator "swoosh"
+  let o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = "triangle";
+  o.frequency.value = 750 + Math.random()*600;
+  g.gain.value = 0.12;
+  o.connect(g).connect(audioCtx.destination);
+  o.frequency.linearRampToValueAtTime(120, audioCtx.currentTime + 0.21);
+  g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.21);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.23);
+
+  // White noise "shhh"
+  let bufferSize = 2048;
+  let noise = audioCtx.createBufferSource();
+  let buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  let data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  noise.buffer = buffer;
+  let noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0.11;
+  noise.connect(noiseGain).connect(audioCtx.destination);
+  noise.start();
+  noise.stop(audioCtx.currentTime + 0.18);
+  noiseGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.18);
+}
+
+document.getElementById("musicBtn").onclick = () => {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  music.play();
+  document.getElementById("musicBtn").style.display = "none";
+};
+
+// ======== PIXEL HELPERS ========
+const canvas = document.getElementById("frog");
+const ctx = canvas.getContext("2d");
+function px(n) { return Math.round(n * SCALE); }
+
+// ======== RANDOM PROPS ========
+const PROPS = [
+  null,
+  { type: "bowtie", color: "#f22" },
+  { type: "bowtie", color: "#2bf" },
+  { type: "monocle" },
+  { type: "sunglasses" }
+];
+function randomProp() {
+  return PROPS[Math.floor(Math.random() * PROPS.length)];
+}
+
+// ======== CHOREOGRAPHY ========
+const choreo = [
+  { t: 0,    dur: 32, pose: { legMove: "out", armMove: "side", caneTwirling: false, jump: false, spin: false, hatTip: false, sing: true } },
+  { t: 32,   dur: 30, pose: { legMove: "moonwalk", armMove: "wave", caneTwirling: false, jump: false, spin: false, hatTip: false, sing: true } },
+  { t: 62,   dur: 22, pose: { legMove: "moonwalk", armMove: "wave", caneTwirling: true,  jump: false, spin: false, hatTip: false, sing: true } },
+  { t: 84,   dur: 16, pose: { legMove: "moonwalk", armMove: "wave", caneTwirling: true,  jump: true, spin: false, hatTip: false, sing: false } },
+  { t: 100,  dur: 16, pose: { legMove: null, armMove: "tipHat", caneTwirling: false, jump: true, spin: false, hatTip: true, sing: false } },
+  { t: 116,  dur: 22, pose: { legMove: "out", armMove: "side", caneTwirling: true, jump: false, spin: true, hatTip: false, sing: true } },
+  { t: 138,  dur: 26, pose: { legMove: null, armMove: "wave", caneTwirling: false, jump: true, spin: false, hatTip: false, sing: false } },
+  { t: 164,  dur: 26, pose: { legMove: "out", armMove: "side", caneTwirling: false, jump: false, spin: false, hatTip: false, sing: true } }
+];
+const choreoTotal = choreo.map(c=>c.dur).reduce((a,b)=>a+b,0);
+
+// ======== HAT COLORS (RAINBOW) ========
+function hatColorForSection(section) {
+  const colors = ["#FF2222", "#FFA900", "#43D02D", "#1978D4", "#B21AF5", "#F53E9A"];
+  return colors[section % colors.length];
+}
+
+// ======== SPOTLIGHT, CONFETTI, CROWD ========
+function drawSpotlight(cx, cy, w, h, frame, color) {
+  const swing = Math.sin(frame/48) * 44;
+  ctx.save();
+  ctx.globalAlpha = 0.16 + 0.10 * Math.sin(frame/22);
+  ctx.beginPath();
+  ctx.ellipse(cx + swing, cy, w, h, 0, 0, Math.PI*2);
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, w);
+  g.addColorStop(0, color || "#ffeab9");
+  g.addColorStop(1, "#0000");
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.restore();
+}
+
+function drawConfetti(frame) {
+  for(let i=0; i<60; ++i){
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 420 + 120;
+    const x = canvas.width/2 + Math.cos(angle+frame/32) * dist * Math.sin(frame/70+i);
+    const y = 180 + Math.abs(Math.sin(angle+frame/20))*90 + Math.sin(frame/19+i)*13;
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = `hsl(${(angle*180/Math.PI+frame*2+i*12)%360},93%,58%)`;
+    ctx.beginPath();
+    ctx.arc(x, y, 6 + Math.sin(i+frame/7)*2, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawCrowd(frame, cheer) {
+  for(let r=0; r<CROWD_ROWS; ++r){
+    for(let c=0; c<CROWD_COLS; ++c){
+      let x = 60 + c*95 + (r%2)*40, y = 338 + r*32 + Math.sin(frame/18+c*2+r*6)*3;
+      ctx.save();
+      ctx.globalAlpha = 0.28 + 0.15*Math.sin((frame + c*21 + r*12)/23);
+      ctx.fillStyle = "#233";
+      ctx.beginPath();
+      ctx.ellipse(x, y, 36, 20, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      if(cheer && Math.random() > 0.7) {
+        ctx.strokeStyle = "#39d";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(x-18, y+7);
+        ctx.lineTo(x-32, y-13-Math.random()*9);
+        ctx.moveTo(x+18, y+7);
+        ctx.lineTo(x+32, y-13-Math.random()*9);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+}
+
+// ======== DRAW FROG ========
+function drawFrog(x, y, frame, pose, hatColor, mouthAnim, prop) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  let bobY = Math.sin(frame/13) * px(0.8) + (pose.jump ? -px(2.6) : 0);
+  let spin = pose.spin ? Math.sin(frame/9) * 0.24 : 0;
+  ctx.translate(0, bobY);
+  ctx.rotate(spin);
+
+  let hatTip = pose.hatTip ? Math.sin(frame/2) * 0.45 : 0;
+
+  // Shadow
+  ctx.save();
+  ctx.globalAlpha = 0.23;
+  ctx.fillStyle = "#333";
+  ctx.beginPath();
+  ctx.ellipse(px(7), px(19), px(7), px(2.2), 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // Legs
+  ctx.fillStyle = "#2d7f30";
+  if (pose.legMove === "out") {
+    ctx.save();
+    ctx.rotate(-0.19);
+    ctx.fillRect(px(2.8), px(16), px(2), px(5));
+    ctx.restore();
+    ctx.fillRect(px(10.2), px(17), px(2), px(4));
+  } else if (pose.legMove === "moonwalk") {
+    ctx.fillRect(px(3.8), px(16), px(2), px(4));
+    ctx.save();
+    ctx.translate(px(10.5), px(17));
+    ctx.rotate(-Math.PI/14);
+    ctx.fillRect(0, 0, px(2), px(4));
+    ctx.restore();
+  } else {
+    ctx.fillRect(px(4), px(17), px(2), px(4));
+    ctx.fillRect(px(9), px(17), px(2), px(4));
+  }
+
+  // Body
+  ctx.fillStyle = "#37c948";
+  ctx.fillRect(px(4), px(10), px(6), px(6));
+  ctx.beginPath();
+  ctx.ellipse(px(7), px(12), px(3), px(3.2), 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Belly
+  ctx.fillStyle = "#f7f7a2";
+  ctx.beginPath();
+  ctx.ellipse(px(7), px(15), px(2.1), px(1.2), 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Left arm
+  ctx.save();
+  ctx.translate(px(2.2), px(13.2));
+  let armAngle = 0;
+  if (pose.armMove === "tipHat") armAngle = -Math.PI/2.3 + Math.sin(frame/2) * 0.1;
+  else if (pose.armMove === "side") armAngle = -Math.PI/5;
+  else if (pose.armMove === "wave") armAngle = -0.6 + Math.sin(frame/2) * 0.19;
+  ctx.rotate(armAngle);
+  ctx.fillStyle = "#2d7f30";
+  ctx.fillRect(0, 0, px(2), px(6));
+  ctx.restore();
+
+  // Right arm + cane
+  ctx.save();
+  ctx.translate(px(11.2), px(13));
+  let caneArm = 0.2 + (pose.caneTwirling ? Math.sin(frame/2) * 0.6 : 0.04 * Math.sin(frame/1.7));
+  ctx.rotate(caneArm);
+  ctx.fillStyle = "#2d7f30";
+  ctx.fillRect(0, 0, px(2), px(6));
+
+  // Cane
+  ctx.save();
+  ctx.translate(px(1.2), px(5.5));
+  let caneAngle = pose.caneTwirling ? Math.sin(frame/2) * 0.4 : 0;
+  ctx.rotate(caneAngle);
+  ctx.fillStyle = "#895428";
+  ctx.fillRect(0, 0, px(0.6), px(7));
+  // Cane tip
+  ctx.beginPath();
+  ctx.arc(px(0.35), px(7), px(1.2), 0, Math.PI*2);
+  ctx.fillStyle = "#fff442";
+  ctx.fill();
+  ctx.restore();
+  // Cane band
+  ctx.fillStyle = "#d43636";
+  ctx.fillRect(px(1.2), px(8.5), px(0.6), px(1.1));
+  ctx.restore();
+
+  // Props (bowtie, monocle, sunglasses)
+  if (prop && prop.type === "bowtie") {
+    ctx.save();
+    ctx.fillStyle = prop.color;
+    ctx.beginPath();
+    ctx.moveTo(px(7), px(15.8));
+    ctx.lineTo(px(5.7), px(17.3));
+    ctx.lineTo(px(7), px(16.2));
+    ctx.lineTo(px(8.3), px(17.3));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  } else if (prop && prop.type === "monocle") {
+    ctx.save();
+    ctx.strokeStyle = "#ff9";
+    ctx.lineWidth = px(0.2);
+    ctx.beginPath();
+    ctx.arc(px(9), px(7), px(1.2), 0, Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px(9.9), px(7.6));
+    ctx.lineTo(px(11), px(10));
+    ctx.stroke();
+    ctx.restore();
+  } else if (prop && prop.type === "sunglasses") {
+    ctx.save();
+    ctx.fillStyle = "#111";
+    ctx.fillRect(px(4.6), px(6), px(2), px(0.8));
+    ctx.fillRect(px(7.2), px(6), px(2), px(0.8));
+    ctx.fillRect(px(6.6), px(6.3), px(0.7), px(0.4));
+    ctx.restore();
+  }
+
+  // Head
+  ctx.save();
+  ctx.translate(px(7), px(7));
+  ctx.rotate(hatTip);
+  ctx.translate(-px(7), -px(7));
+  ctx.fillStyle = "#37c948";
+  ctx.beginPath();
+  ctx.ellipse(px(7), px(7), px(3.5), px(2.9), 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.arc(px(5.3), px(6.3), px(0.8), 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(px(8.7), px(6.3), px(0.8), 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#222";
+  ctx.beginPath(); ctx.arc(px(5.3), px(6.5), px(0.42), 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(px(8.7), px(6.5), px(0.42), 0, Math.PI*2); ctx.fill();
+
+  // Blush
+  ctx.fillStyle = "#ffbbbb";
+  ctx.beginPath();
+  ctx.arc(px(4.7), px(8), px(0.32), 0, Math.PI*2);
+  ctx.arc(px(9.3), px(8), px(0.32), 0, Math.PI*2);
+  ctx.fill();
+
+  // Mouth: animated for karaoke
+  ctx.save();
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = px(0.34);
+  ctx.beginPath();
+  if (mouthAnim > 0.4) {
+    ctx.arc(px(7), px(8), px(1.2), 0, Math.PI, false);
+  } else {
+    ctx.arc(px(7), px(8), px(1), 0.3, Math.PI-0.3);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  // Top hat (rainbow)
+  ctx.fillStyle = "#14132a";
+  ctx.fillRect(px(4), px(3.5), px(6), px(1));
+  ctx.fillStyle = hatColor || "#191970";
+  ctx.fillRect(px(5.2), px(1), px(3.6), px(2.7));
+  ctx.fillStyle = "#ee2020";
+  ctx.fillRect(px(5.2), px(3), px(3.6), px(0.6));
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ======== NEON SIGN ========
+function drawNeon(frame) {
+  ctx.save();
+  ctx.font = `bold 38px monospace`;
+  ctx.shadowColor = "#f0f";
+  ctx.shadowBlur = 40 + Math.sin(frame/5)*20;
+  ctx.textAlign = "center";
+  ctx.globalAlpha = 0.92 + Math.sin(frame/6)*0.05;
+  ctx.fillStyle = `hsl(${(frame*2)%360},94%,65%)`;
+  ctx.fillText("FROG!", canvas.width/2, 87 + Math.sin(frame/5)*2);
+  ctx.restore();
+}
+
+// ======== KARAOKE LYRICS ========
+function drawLyrics(line, frame, beat) {
+  ctx.save();
+  ctx.font = `bold 33px 'Segoe UI', monospace`;
+  ctx.textAlign = "center";
+  ctx.shadowColor = "#fff";
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = "#fffdc1";
+  let y = 420 + Math.sin(frame/beat)*8;
+  ctx.fillText(line.text, canvas.width/2, y);
+  ctx.restore();
+}
+
+// ======== CHORUS LINE ========
+let frogs = [], frogProps = [];
+function updateFrogs(frame, mouthAnim, lyricSection) {
+  frogs = [];
+  let totalWidth = (FROG_COUNT - 1) * FROG_SPACE;
+  for (let f = 0; f < FROG_COUNT; ++f) {
+    let t = (frame + f*18) % choreoTotal;
+    let section = 0, time = 0;
+    for (let i=0; i<choreo.length; ++i) {
+      if (t >= choreo[i].t && t < choreo[i].t + choreo[i].dur) {
+        section = i;
+        break;
+      }
+      time += choreo[i].dur;
+    }
+    let pose = choreo[section].pose;
+    let hatColor = hatColorForSection(lyricSection + f);
+    let prop = frogProps[f] || randomProp();
+    frogProps[f] = prop;
+    frogs.push({
+      x: FROG_MARGIN + f * FROG_SPACE + (canvas.width - totalWidth - 2 * FROG_MARGIN) / 2,
+      y: px(24),
+      pose: pose,
+      hatColor: hatColor,
+      mouthAnim: mouthAnim,
+      prop: prop
+    });
+  }
+}
+
+// ======== MAIN LOOP ========
+let frame = 0, lyricIdx = 0, lyricTime = 0, lyricBeat = 0, confetti = false;
+let lastTwirling = false, lastApplause = -2000;
+function loop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  let t = frame % choreoTotal, time = 0, pose = {};
+  let choreoSection = 0;
+  for (let i=0; i<choreo.length; ++i) {
+    if (t >= choreo[i].t && t < choreo[i].t + choreo[i].dur) {
+      choreoSection = i;
+      pose = choreo[i].pose;
+      break;
+    }
+    time += choreo[i].dur;
+  }
+  lyricTime++;
+  if (lyricIdx < LYRICS.length && lyricTime > LYRICS[lyricIdx].beats) {
+    lyricTime = 0;
+    lyricIdx++;
+    if (lyricIdx === LYRICS.length) {
+      confetti = true;
+      if (frame - lastApplause > 2000) {
+        applause.currentTime = 0; applause.play();
+        lastApplause = frame;
+      }
+    }
+  }
+  if (lyricIdx >= LYRICS.length) lyricIdx = 0, lyricTime = 0, confetti = false;
+
+  let lyricSection = lyricIdx;
+  let karaoke = LYRICS[lyricIdx] || LYRICS[LYRICS.length-1];
+  lyricBeat = (lyricTime % LYRICS_BEAT) / LYRICS_BEAT;
+  let mouthAnim = Math.abs(Math.sin(lyricBeat * Math.PI));
+  if (lyricIdx === 4) drawNeon(frame);
+
+  drawCrowd(frame, confetti || (pose.jump && frame%16<12));
+  let discoColor = `hsl(${(frame*2)%360},93%,65%)`;
+  drawSpotlight(canvas.width/2, px(18), px(40), px(18), frame, discoColor);
+
+  if (confetti) drawConfetti(frame);
+
+  updateFrogs(frame, mouthAnim, lyricSection);
+  frogs.forEach(frog => drawFrog(frog.x, frog.y, frame, frog.pose, frog.hatColor, frog.mouthAnim, frog.prop));
+
+  ctx.save();
+  ctx.strokeStyle = "#fff";
+  ctx.globalAlpha = 0.12;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, px(34.6));
+  ctx.lineTo(canvas.width, px(34.6));
+  ctx.stroke();
+  ctx.restore();
+
+  drawLyrics(karaoke, frame, LYRICS_BEAT);
+
+  frame++;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
