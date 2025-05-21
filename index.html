@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Frog Vaudeville: Chiptune Edition</title>
+  <title>Frog Vaudeville: Real Ragtime Edition</title>
   <style>
     html, body { margin: 0; background: #1b1c25; height: 100%; }
     body { width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; }
@@ -36,41 +36,15 @@ const LYRICS = [
 const LYRICS_BEAT = 15;
 
 // ======== SOUND SETUP ========
-// Chiptune version of "The Entertainer"
+// Ragtime (Scott Joplin) from Internet Archive (direct OGG)
 const RAGTIME_MUSIC = "https://ia601300.us.archive.org/10/items/RagtimePianoSCOTTJOPLIN.TheEntertainer1902/Ragtime%20Piano%20_%20SCOTT%20JOPLIN%20.%20%20The%20Entertainer%20%20%281902%29.ogg";
-const APPLAUSE_URL = "https://pixabay.com/sound-effects/applause-01-253125/";
+// Free applause, direct link (Pixabay)
+const APPLAUSE_URL = "https://cdn.pixabay.com/audio/2022/03/15/audio_115b9a00a2.mp3";
 let music = new Audio(RAGTIME_MUSIC);
 music.loop = true;
 let applause = new Audio(APPLAUSE_URL);
 applause.volume = 0.32;
 let audioCtx;
-function playCaneTwirl() {
-  if (!audioCtx) return;
-  // Oscillator "swoosh"
-  let o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type = "triangle";
-  o.frequency.value = 750 + Math.random()*600;
-  g.gain.value = 0.12;
-  o.connect(g).connect(audioCtx.destination);
-  o.frequency.linearRampToValueAtTime(120, audioCtx.currentTime + 0.21);
-  g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.21);
-  o.start();
-  o.stop(audioCtx.currentTime + 0.23);
-
-  // White noise "shhh"
-  let bufferSize = 2048;
-  let noise = audioCtx.createBufferSource();
-  let buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  let data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-  noise.buffer = buffer;
-  let noiseGain = audioCtx.createGain();
-  noiseGain.gain.value = 0.11;
-  noise.connect(noiseGain).connect(audioCtx.destination);
-  noise.start();
-  noise.stop(audioCtx.currentTime + 0.18);
-  noiseGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.18);
-}
 
 document.getElementById("musicBtn").onclick = () => {
   audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -405,7 +379,7 @@ function updateFrogs(frame, mouthAnim, lyricSection) {
 
 // ======== MAIN LOOP ========
 let frame = 0, lyricIdx = 0, lyricTime = 0, lyricBeat = 0, confetti = false;
-let lastTwirling = false, lastApplause = -2000;
+let lastApplause = -2000;
 function loop() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
